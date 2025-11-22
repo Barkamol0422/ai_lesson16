@@ -1,71 +1,81 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-from comtypes import CLSCTX_ALL
 from math import hypot
 import screen_brightness_control as sbc
+import os
 
-mp_hands=mp.solutions.hands
-hands=mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7)
-mp_draw=mp.solutions.drawing_utils
-try:
-    devices = AudioUtilities.GetSpeakers()
-    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    volume = interface.QueryInterface(IAudioEndpointVolume)
-    vol_range = volume.GetVolumeRange()
-    min_vol = vol_range[0]
-    max_vol = vol_range[1]
-except Exception as e:
-    print("Error: Could not access webcam")
-    exit()
-cap=cv2.VideoCapture(0)
+def set_volume(percent):
+    percent = max(0, min(100, int(percent)))
+    os.system(f"pactl set-sink-volume @DEFAULT_SINK@ {percent}%")
+
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7)
+mp_draw = mp.solutions.drawing_utils
+
+
+cap = cv2.VideoCapture(0)
 if not cap.isOpened():
     print("Error: Could not access webcam")
     exit()
+
 while True:
-    success,img=cap.read()
+    success, img = cap.read()
     if not success:
         print("Error: Could not read frame")
         break
-    img=cv2.flip(img,1)
-    img_rgb=cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-    results=hands.process(img_rgb)
+
+    img = cv2.flip(img, 1)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    results = hands.process(img_rgb)
+
     if results.multi_hand_landmarks and results.multi_handedness:
         for i, hand_landmarks in enumerate(results.multi_hand_landmarks):
             hand_label = results.multi_handedness[i].classification[0].label
+
             mp_draw.draw_landmarks(img, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+
             thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
             index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
-            h,w,_=img.shape
-            thumb_pos=(int(thumb_tip.x * w), int(thumb_tip.y * h))
-            index_pos=(int(index_tip.x * w), int(index_tip.y * h))
+
+            h, w, _ = img.shape
+            thumb_pos = (int(thumb_tip.x * w), int(thumb_tip.y * h))
+            index_pos = (int(index_tip.x * w), int(index_tip.y * h))
+
             cv2.circle(img, thumb_pos, 10, (255, 0, 0), cv2.FILLED)
             cv2.circle(img, index_pos, 10, (255, 0, 0), cv2.FILLED)
             cv2.line(img, thumb_pos, index_pos, (255, 0, 0), 3)
-            distance = hypot(index_pos[0] - thumb_pos[0], index_pos[1] - thumb_pos[1])
+
+            distance = hypot(index_pos[0] - thumb_pos[0],
+                             index_pos[1] - thumb_pos[1])
             if hand_label == "Right":
-                vol = np.interp(distance, [30, 300], [min_vol, max_vol])
-                try:
-                    volume.SetMasterVolumeLevel(vol, None)
-                except Exception as e:
-                    print("Error: Could not set volume")
-                vol_bar= np.interp(distance, [30, 300], [400, 150])
+                vol_percent = np.interp(distance, [30, 300], [0, 100])
+                set_volume(vol_percent)
+
+                vol_bar = np.interp(distance, [30, 300], [400, 150])
+
                 cv2.rectangle(img, (50, 150), (85, 400), (255, 0, 0), 2)
                 cv2.rectangle(img, (50, int(vol_bar)), (85, 400), (255, 0, 0), cv2.FILLED)
-                cv2.putText(img, f'Vol: {int(np.interp(distance, [30, 300], [0, 100]))} %', (40, 450), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 0, 0), 2)
+                cv2.putText(img, f'Vol: {int(vol_percent)} %',
+                            (40, 450), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 0, 0), 2)
+
             elif hand_label == "Left":
-                brightness = np.interp(distance, [30, 300], [0, 100])
+                bright_percent = np.interp(distance, [30, 300], [0, 100])
                 try:
-                    sbc.set_brightness(int(brightness))
-                except Exception as e:
-                    print("Error: Could not set brightness")
-                bright_bar= np.interp(distance, [30, 300], [400, 150])
+                    sbc.set_brightness(int(bright_percent))
+                except:
+                    pass
+
+                bright_bar = np.interp(distance, [30, 300], [400, 150])
+
                 cv2.rectangle(img, (500, 150), (535, 400), (0, 255, 0), 2)
                 cv2.rectangle(img, (500, int(bright_bar)), (535, 400), (0, 255, 0), cv2.FILLED)
-                cv2.putText(img, f'Bright: {int(np.interp(distance, [30, 300], [0, 100]))} %', (400, 450), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 2)
-    cv2.imshow("Gesture volume and Brightness controller",img)
+                cv2.putText(img, f'Bright: {int(bright_percent)} %',
+                            (400, 450), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 2)
+
+    cv2.imshow("Gesture Volume and Brightness Controller", img)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+
 cap.release()
 cv2.destroyAllWindows()
